@@ -1,0 +1,570 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Crossle">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#eef1f6">
+<meta name="description" content="Crack every word in an interlocking grid on one shared guess budget.">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon.svg">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<title>Crossle</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@112,700;112,800&family=Atkinson+Hyperlegible:wght@400;700&display=swap">
+<style>
+/* Layout: one-screen phone game. Header + mode bar, guess-budget meter, 5x5 crossing grid, history of the selected word, keyboard docked at the bottom. */
+:root{
+  --bg:#eef1f6; --surface:#ffffff; --ink:#17203a; --muted:#5b6580; --line:#cdd4e3;
+  --accent:#2747d0; --accent-soft:#dce3fb;
+  --hit:#2e8b55; --near:#c3911a; --miss:#7b8398; --key:#dde2ec; --tile-fg:#ffffff;
+  --f-display:"Archivo","Arial Black",system-ui,sans-serif;
+  --f-body:"Atkinson Hyperlegible",system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#0e1322; --surface:#171f35; --ink:#e7ebf6; --muted:#97a0bb; --line:#2c3653;
+  --accent:#8199ff; --accent-soft:#25305b;
+  --hit:#36985f; --near:#bf9629; --miss:#4b546d; --key:#2a3350; --tile-fg:#ffffff; color-scheme:dark } }
+:root[data-theme="dark"]{
+  --bg:#0e1322; --surface:#171f35; --ink:#e7ebf6; --muted:#97a0bb; --line:#2c3653;
+  --accent:#8199ff; --accent-soft:#25305b;
+  --hit:#36985f; --near:#bf9629; --miss:#4b546d; --key:#2a3350; --tile-fg:#ffffff; color-scheme:dark }
+
+[hidden]{display:none!important}
+*,*::before,*::after{box-sizing:border-box}
+:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);box-sizing:border-box;height:100%}
+body{margin:0}
+html,body{height:100%}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  -webkit-tap-highlight-color:transparent;overscroll-behavior:none}
+#app{max-width:500px;margin:0 auto;height:100%;display:flex;flex-direction:column;gap:10px;padding-block:10px 8px;box-sizing:border-box}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible,input:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+
+header{display:flex;align-items:center;gap:8px}
+h1{font-family:var(--f-display);font-weight:800;font-stretch:112%;font-size:26px;letter-spacing:.02em;margin:0;flex:1;display:flex;align-items:center;gap:8px}
+.logo{display:grid;grid-template-columns:repeat(3,7px);gap:2px}
+.logo i{width:7px;height:7px;border-radius:1.5px;background:var(--line)}
+.logo i.g{background:var(--hit)} .logo i.y{background:var(--near)} .logo i.n{visibility:hidden}
+.icon{width:38px;height:38px;border-radius:10px;border:1.5px solid var(--line);background:var(--surface);font-weight:700;display:grid;place-items:center}
+.icon svg{width:18px;height:18px}
+
+.bar{display:flex;gap:8px;flex-wrap:wrap}
+.seg{display:flex;background:var(--key);border-radius:10px;padding:3px;gap:2px}
+.seg button{border:0;background:transparent;padding:6px 11px;border-radius:8px;font-weight:700;font-size:13px;color:var(--muted)}
+.seg button[aria-pressed="true"]{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgb(0 0 0 / .12)}
+.seg.grow{flex:1} .seg.grow button{flex:1}
+
+.status{white-space:nowrap;display:flex;align-items:baseline;justify-content:space-between;gap:10px;font-size:13px;color:var(--muted)}
+.status b{color:var(--ink);font-variant-numeric:tabular-nums}
+#code{border:0;background:none;padding:0;font-size:12px;color:var(--muted);text-decoration:underline dotted;text-underline-offset:3px;font-variant-numeric:tabular-nums}
+.meter{height:6px;border-radius:3px;background:var(--key);overflow:hidden;margin-top:-4px}
+.meter i{display:block;height:100%;background:var(--accent);border-radius:3px;transition:width .3s}
+.meter.low i{background:var(--near)} .meter.out i{background:var(--miss)}
+
+.board{flex:1;min-height:0;display:flex;align-items:center;justify-content:center}
+.grid{display:grid;grid-template-columns:repeat(5,1fr);grid-template-rows:repeat(5,1fr);gap:6px;width:min(100%,400px,calc(100dvh - 400px));min-width:220px;aspect-ratio:1}
+.cell{position:relative;border-radius:8px;display:grid;place-items:center;user-select:none;
+  font-family:var(--f-display);font-weight:800;font-stretch:112%;font-size:clamp(18px,6.4vw,30px);text-transform:uppercase;
+  background:var(--surface);border:2px solid var(--line);transition:background .2s,border-color .2s,transform .15s;cursor:pointer}
+.cell.void{visibility:hidden;cursor:default}
+.cell .n{position:absolute;top:2px;left:4px;font-family:var(--f-body);font-size:10px;font-weight:700;color:var(--muted)}
+.cell.sel{border-color:var(--accent);background:var(--accent-soft)}
+.cell.cursor{box-shadow:inset 0 -4px 0 var(--accent)}
+.cell.known{background:var(--hit);border-color:var(--hit);color:var(--tile-fg)}
+.cell.known .n{color:rgb(255 255 255 / .8)}
+.cell.known.sel{box-shadow:0 0 0 2px var(--accent)}
+.cell.reveal{background:var(--miss);border-color:var(--miss);color:var(--tile-fg)}
+.cell.reveal .n{color:rgb(255 255 255 / .8)}
+.cell.pop{animation:pop .35s ease}
+.shake{animation:shake .35s}
+@keyframes pop{40%{transform:scale(1.12)}}
+@keyframes shake{20%,60%{transform:translateX(-5px)}40%,80%{transform:translateX(5px)}}
+
+.hist{background:var(--surface);border:1.5px solid var(--line);border-radius:12px;padding:8px 10px;display:flex;flex-direction:column;gap:6px;min-height:0}
+.hhead{display:flex;align-items:center;gap:8px;font-size:13px}
+.hhead strong{font-family:var(--f-display);font-stretch:112%;font-weight:700;font-size:14px}
+.hhead span{color:var(--muted);flex:1}
+.nav{border:0;background:var(--key);width:30px;height:28px;border-radius:7px;font-weight:700}
+.rows{display:flex;flex-wrap:wrap;gap:6px 10px;max-height:58px;overflow-y:auto;font-size:13px;color:var(--muted)}
+.mini{display:flex;gap:2px}
+.mini i{width:20px;height:20px;border-radius:4px;display:grid;place-items:center;font-style:normal;font-family:var(--f-display);font-weight:800;font-size:11px;text-transform:uppercase;color:var(--tile-fg);background:var(--miss)}
+.mini i.g{background:var(--hit)} .mini i.y{background:var(--near)}
+
+.kb{display:flex;flex-direction:column;gap:6px;user-select:none}
+.kr{display:flex;gap:5px;justify-content:center}
+.k{flex:1;max-width:44px;height:50px;border:0;border-radius:7px;background:var(--key);font-weight:700;font-size:15px;text-transform:uppercase;padding:0}
+.k.wide{max-width:68px;flex:1.5;font-size:12px}
+.k.g{background:var(--hit);color:var(--tile-fg)} .k.y{background:var(--near);color:var(--tile-fg)} .k.b{background:var(--miss);color:var(--tile-fg);opacity:.75}
+
+#toast{position:fixed;left:50%;top:calc(70px + env(safe-area-inset-top,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:9px 14px;border-radius:9px;font-weight:700;font-size:14px;z-index:30;pointer-events:none;opacity:0;transition:opacity .2s;max-width:calc(100% - 40px);text-align:center}
+#toast.on{opacity:1}
+
+.overlay{position:fixed;inset:0;background:rgb(8 12 24 / .55);display:grid;place-items:center;z-index:20;
+  padding:max(16px,env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) max(16px,env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
+.sheet{background:var(--surface);border-radius:16px;max-width:420px;width:100%;max-height:100%;overflow-y:auto;padding:20px;box-sizing:border-box;display:flex;flex-direction:column;gap:14px}
+.sheet h2{font-family:var(--f-display);font-stretch:112%;font-weight:800;font-size:22px;margin:0;text-wrap:balance}
+.sheet p,.sheet li{line-height:1.5;margin:0}
+.sheet ul{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px}
+.sheet .sub{color:var(--muted);font-size:14px}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;text-align:center}
+.stats b{display:block;font-family:var(--f-display);font-stretch:112%;font-size:22px;font-variant-numeric:tabular-nums}
+.stats span{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.answers{display:flex;flex-direction:column;gap:6px}
+.ans{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--muted)}
+.ans .lbl{width:70px}
+.ans .mini i{width:24px;height:24px;font-size:13px}
+.btns{display:flex;gap:8px;flex-wrap:wrap}
+.btn{flex:1;min-width:120px;border:0;border-radius:10px;padding:12px;font-weight:700;background:var(--key)}
+.btn.primary{background:var(--accent);color:#fff}
+.close{align-self:flex-end;margin:-8px -8px -10px 0}
+.codebox{display:flex;gap:8px}
+.codebox input{flex:1;min-width:0;border:1.5px solid var(--line);border-radius:10px;padding:10px;font:inherit;background:var(--bg);color:var(--ink);text-transform:lowercase}
+textarea.copy{width:100%;box-sizing:border-box;min-height:120px;border-radius:10px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:13px/1.4 ui-monospace,monospace;padding:8px}
+.legend{display:flex;gap:12px;flex-wrap:wrap;font-size:13px;color:var(--muted)}
+.legend .mini i{width:18px;height:18px}
+@media (max-height:640px){ .k{height:42px} .rows{max-height:44px} }
+@media (prefers-reduced-motion:reduce){ *{animation:none!important;transition:none!important} }
+</style>
+
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1><span class="logo" aria-hidden="true"><i class="n"></i><i class="g"></i><i class="n"></i><i class="y"></i><i class="g"></i><i></i><i class="n"></i><i></i><i class="n"></i></span>Crossle</h1>
+    <button class="icon" id="bStats" aria-label="Stats">
+      <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><rect x="2" y="10" width="4" height="8" rx="1"/><rect x="8" y="5" width="4" height="13" rx="1"/><rect x="14" y="2" width="4" height="16" rx="1"/></svg>
+    </button>
+    <button class="icon" id="bHelp" aria-label="How to play">?</button>
+  </header>
+  <div class="bar">
+    <div class="seg" role="group" aria-label="Mode">
+      <button id="mDaily" aria-pressed="true">Daily</button>
+      <button id="mEndless" aria-pressed="false">Endless</button>
+    </div>
+    <div class="seg grow" role="group" aria-label="Difficulty">
+      <button data-d="e" aria-pressed="false">Easy</button>
+      <button data-d="m" aria-pressed="true">Medium</button>
+      <button data-d="h" aria-pressed="false">Hard</button>
+    </div>
+  </div>
+  <div class="status">
+    <span id="where">Daily</span>
+    <button id="code" title="Copy this grid's code"></button>
+    <span><b id="left">16</b> left</span>
+  </div>
+  <div class="meter" id="meter"><i></i></div>
+  <div class="board"><div class="grid" id="grid"></div></div>
+  <div class="hist" id="hist">
+    <div class="hhead">
+      <button class="nav" id="prev" aria-label="Previous word">‹</button>
+      <strong id="hLabel">1 Across</strong><span id="hCount"></span>
+      <button class="nav" id="next" aria-label="Next word">›</button>
+    </div>
+    <div class="rows" id="rows"></div>
+  </div>
+  <div class="kb" id="kb"></div>
+</div>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<div class="overlay" id="ovHelp" hidden><div class="sheet" role="dialog" aria-labelledby="hTitle">
+  <button class="icon close" data-close aria-label="Close">✕</button>
+  <h2 id="hTitle">How to play</h2>
+  <ul>
+    <li>Solve every hidden word in the grid before your guesses run out.</li>
+    <li>Tap a word to select it, type a real 5-letter word, and press Enter.</li>
+    <li>Colors describe that word only:</li>
+  </ul>
+  <div class="legend">
+    <span class="mini"><i class="g">r</i></span> right spot
+    <span class="mini"><i class="y">a</i></span> in the word, wrong spot
+    <span class="mini"><i>t</i></span> not in this word
+  </div>
+  <ul>
+    <li>Green letters lock into the grid, so they also fill in any word that crosses there.</li>
+    <li>Your guess budget is shared across the whole grid. Choosing which word to attack next is the game.</li>
+    <li><b>Daily</b> is the same grid for everyone each day. <b>Endless</b> deals a fresh grid every time.</li>
+  </ul>
+  <p class="sub">Play a friend's grid: enter the code they sent you.</p>
+  <div class="codebox"><input id="codeIn" placeholder="e.g. m-k3j9xq" autocomplete="off" autocapitalize="off" spellcheck="false"><button class="btn primary" id="codeGo" style="flex:0 0 auto;min-width:0">Play</button></div>
+  <button class="btn primary" data-close>Start playing</button>
+</div></div>
+
+<div class="overlay" id="ovEnd" hidden><div class="sheet" role="dialog" aria-labelledby="eTitle">
+  <button class="icon close" data-close aria-label="Close">✕</button>
+  <h2 id="eTitle"></h2>
+  <p class="sub" id="eSub"></p>
+  <div class="answers" id="eAns"></div>
+  <div class="stats" id="eStats"></div>
+  <div class="btns">
+    <button class="btn" id="eShare">Copy result</button>
+    <button class="btn primary" id="eNext"></button>
+  </div>
+  <textarea class="copy" id="eCopy" hidden readonly></textarea>
+</div></div>
+
+<script src="words.js"></script>
+<script>
+const ANS=window.CROSSLE_ANS.split(" ");
+const VALID=new Set(ANS.concat(window.CROSSLE_VAL.split(" ")));
+
+// Each template: word slots on a 5x5 board as [dir,row,col], plus a guess budget tuned by simulation.
+const TPL={
+  e:[{n:"H",b:13,s:[["d",0,0],["d",0,4],["a",2,0]]},{n:"I",b:13,s:[["a",0,0],["a",4,0],["d",0,2]]}],
+  m:[{n:"Frame",b:16,s:[["a",0,0],["a",4,0],["d",0,0],["d",0,4]]},
+     {n:"Comb",b:16,s:[["a",0,0],["d",0,0],["d",0,2],["d",0,4]]},
+     {n:"Rake",b:16,s:[["a",4,0],["d",0,0],["d",0,2],["d",0,4]]},
+     {n:"E",b:16,s:[["d",0,0],["a",0,0],["a",2,0],["a",4,0]]}],
+  h:[{n:"Waffle",b:21,s:[["a",0,0],["a",2,0],["a",4,0],["d",0,0],["d",0,2],["d",0,4]]},
+     {n:"Ladder",b:19,s:[["a",0,0],["a",2,0],["a",4,0],["d",0,0],["d",0,4]]},
+     {n:"Gate",b:19,s:[["d",0,0],["d",0,2],["d",0,4],["a",0,0],["a",4,0]]}]
+};
+const DNAME={e:"Easy",m:"Medium",h:"Hard"};
+
+// ---------- seeded randomness ----------
+function hashStr(s){let h=1779033703^s.length;for(let i=0;i<s.length;i++){h=Math.imul(h^s.charCodeAt(i),3432918353);h=h<<13|h>>>19}h=Math.imul(h^h>>>16,2246822507);h=Math.imul(h^h>>>13,3266489909);return (h^h>>>16)>>>0}
+function rng(seed){let a=hashStr(seed);return()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+function shuffle(arr,r){for(let i=arr.length-1;i>0;i--){const j=Math.floor(r()*(i+1));[arr[i],arr[j]]=[arr[j],arr[i]]}return arr}
+
+// ---------- puzzle generation ----------
+const IDX=[0,1,2,3,4].map(i=>{const m={};ANS.forEach(w=>(m[w[i]]||(m[w[i]]=[])).push(w));return m});
+function fill(slots,r){
+  const grid=new Map(),words=[];let tries=0;
+  function bt(k){
+    if(k===slots.length)return true;
+    if(++tries>4000)return false;
+    const cs=slots[k].cells;
+    let base=ANS;
+    cs.forEach((c,i)=>{const g=grid.get(c);if(g!==undefined){const l=IDX[i][g]||[];if(l.length<base.length)base=l}});
+    let cand=base.filter(w=>!words.includes(w)&&cs.every((c,i)=>{const g=grid.get(c);return g===undefined||g===w[i]}));
+    cand=shuffle(cand,r).slice(0,40);
+    for(const w of cand){
+      const prev=cs.map(c=>grid.get(c));
+      cs.forEach((c,i)=>grid.set(c,w[i]));words[k]=w;
+      if(bt(k+1))return true;
+      words.length=k;
+      cs.forEach((c,i)=>prev[i]===undefined?grid.delete(c):grid.set(c,prev[i]));
+    }
+    return false;
+  }
+  return bt(0)?words.slice():null;
+}
+function buildPuzzle(code){
+  const d=code[0];
+  for(let attempt=0;attempt<30;attempt++){
+    const r=rng(code+"#"+attempt);
+    const list=TPL[d];const t=list[Math.floor(r()*list.length)];
+    const slots=t.s.map(([dir,row,col])=>({dir,cells:[0,1,2,3,4].map(i=>dir==="d"?(row+i)*5+col:row*5+col+i)}));
+    const words=fill(slots,r);
+    if(!words)continue;
+    // crossword numbering
+    const starts=[...new Set(slots.map(s=>s.cells[0]))].sort((a,b)=>a-b);
+    slots.forEach((s,i)=>{s.ans=words[i];s.num=starts.indexOf(s.cells[0])+1;s.label=s.num+(s.dir==="a"?" Across":" Down");s.short=s.num+(s.dir==="a"?"A":"D");s.hist=[];s.solved=false});
+    slots.sort((a,b)=>a.num-b.num||(a.dir==="a"?-1:1));
+    return {slots,budget:t.b,shape:t.n};
+  }
+  return null;
+}
+
+function score(g,a){
+  const r=Array(5).fill("b"),cnt={};
+  for(let i=0;i<5;i++){if(g[i]===a[i])r[i]="g";else cnt[a[i]]=(cnt[a[i]]||0)+1}
+  for(let i=0;i<5;i++){if(r[i]!=="g"&&cnt[g[i]]>0){r[i]="y";cnt[g[i]]--}}
+  return r.join("");
+}
+
+// ---------- storage (best effort) ----------
+const LS="crossle.v1";
+let store={games:{},stats:{},seen:false,mode:"daily",diff:"m",endless:{}};
+try{const s=JSON.parse(localStorage.getItem(LS));if(s&&s.games)store=Object.assign(store,s)}catch(e){}
+function save(){
+  try{
+    const keys=Object.keys(store.games);
+    if(keys.length>40)keys.sort((a,b)=>(store.games[a].t||0)-(store.games[b].t||0)).slice(0,keys.length-40).forEach(k=>delete store.games[k]);
+    localStorage.setItem(LS,JSON.stringify(store));
+  }catch(e){}
+}
+function stat(d){return store.stats[d]||(store.stats[d]={played:0,won:0,streak:0,max:0,last:"",best:null})}
+
+// ---------- dates & codes ----------
+function today(){const n=new Date();return n.getFullYear()+"-"+String(n.getMonth()+1).padStart(2,"0")+"-"+String(n.getDate()).padStart(2,"0")}
+function dailyCode(d){return d+"-d"+today().replace(/-/g,"")}
+function randCode(d){const a="abcdefghjkmnpqrstuvwxyz23456789";let s="";for(let i=0;i<6;i++)s+=a[Math.floor(Math.random()*a.length)];return d+"-"+s}
+const CODE_RE=/^[emh]-[a-z0-9]{3,12}$/;
+
+// ---------- game ----------
+let G=null;
+const $=id=>document.getElementById(id);
+
+function startGame(code,kind){
+  const p=buildPuzzle(code);
+  if(!p){toast("Couldn't build that grid. Try another code.");return}
+  G={code,kind,diff:code[0],slots:p.slots,budget:p.budget,used:0,known:new Map(),sel:0,buf:Array(5).fill(""),done:false,won:false,log:[]};
+  G.at=Array.from({length:25},()=>[]);
+  G.slots.forEach((s,i)=>s.cells.forEach(c=>G.at[c].push(i)));
+  buildGrid();
+  const saved=store.games[code];
+  if(saved)saved.g.forEach(([si,w])=>apply(si,w,true));
+  if(!G.done)G.sel=pickNext();
+  render();
+  if(G.done)setTimeout(showEnd,250);
+}
+function cur(){return G.slots[G.sel]}
+function pickNext(){
+  let best=-1,bi=0;
+  G.slots.forEach((s,i)=>{if(s.solved)return;const k=s.cells.filter(c=>G.known.has(c)).length;if(k>best){best=k;bi=i}});
+  return bi;
+}
+function select(i){G.sel=i;resetBuf();render()}
+function resetBuf(){G.buf=Array(5).fill("")}
+
+function apply(si,w,silent){
+  const s=G.slots[si],fb=score(w,s.ans);
+  s.hist.push({w,fb});G.used++;G.log.push(si);
+  const fresh=[];
+  s.cells.forEach((c,i)=>{if(fb[i]==="g"&&!G.known.has(c)){G.known.set(c,w[i]);fresh.push(c)}});
+  G.slots.forEach(t=>{t.solved=t.cells.every(c=>G.known.has(c))});
+  if(!silent){
+    const g=store.games[G.code]||(store.games[G.code]={g:[]});
+    g.g.push([si,w]);g.t=Date.now();
+  }
+  if(G.slots.every(t=>t.solved)){G.done=true;G.won=true}
+  else if(G.used>=G.budget){G.done=true;G.won=false}
+  if(!G.done&&s.solved)G.sel=pickNext();
+  resetBuf();
+  return fresh;
+}
+
+function finish(){
+  const g=store.games[G.code];
+  if(g.counted)return;
+  g.counted=true;
+  const st=stat(G.diff);
+  st.played++;
+  if(G.won){st.won++;const used=G.used;if(st.best===null||used<st.best)st.best=used}
+  if(G.kind==="daily"){
+    const t=today();
+    const y=new Date();y.setDate(y.getDate()-1);
+    const ys=y.getFullYear()+"-"+String(y.getMonth()+1).padStart(2,"0")+"-"+String(y.getDate()).padStart(2,"0");
+    if(G.won){st.streak=(st.last===ys)?st.streak+1:1;st.last=t;st.max=Math.max(st.max,st.streak)}
+    else{st.streak=0;st.last=""}
+  }
+}
+
+// ---------- input ----------
+function typeLetter(l){
+  if(!G||G.done)return;const s=cur();if(s.solved)return;
+  const i=s.cells.findIndex((c,i)=>!G.known.has(c)&&!G.buf[i]);
+  if(i<0)return;G.buf[i]=l;render();
+}
+function backspace(){
+  if(!G||G.done)return;const s=cur();
+  for(let i=4;i>=0;i--){if(!G.known.has(s.cells[i])&&G.buf[i]){G.buf[i]="";break}}
+  render();
+}
+function enter(){
+  if(!G||G.done)return;const s=cur();
+  if(s.solved){toast("That word is solved. Pick another.");return}
+  const w=s.cells.map((c,i)=>G.known.get(c)||G.buf[i]).join("");
+  if(w.length<5){shake();toast("Fill all five letters");return}
+  if(!VALID.has(w)){shake();toast("Not in the word list");return}
+  if(s.hist.some(h=>h.w===w)){shake();toast("Already tried that here");return}
+  const fresh=apply(G.sel,w,false);
+  if(G.done)finish();
+  save();render();
+  fresh.forEach(c=>{const el=cellEls[c];el.classList.remove("pop");void el.offsetWidth;el.classList.add("pop")});
+  if(G.done)setTimeout(showEnd,G.won?700:500);
+  else if(s.solved)toast(s.label+" solved");
+}
+function shake(){const s=cur();s.cells.forEach(c=>{const el=cellEls[c];el.classList.remove("shake");void el.offsetWidth;el.classList.add("shake")})}
+function cycle(dir){
+  if(!G)return;const n=G.slots.length;
+  let i=G.sel;for(let k=0;k<n;k++){i=(i+dir+n)%n;if(!G.slots[i].solved||G.done)break}
+  select(i);
+}
+
+// ---------- rendering ----------
+let cellEls=[];
+function buildGrid(){
+  const grid=$("grid");grid.innerHTML="";cellEls=[];
+  for(let c=0;c<25;c++){
+    const el=document.createElement("div");
+    el.className="cell"+(G.at[c].length?"":" void");
+    if(G.at[c].length){
+      el.setAttribute("role","button");el.tabIndex=-1;
+      const st=G.slots.find(s=>s.cells[0]===c);
+      if(st)el.innerHTML='<span class="n">'+st.num+'</span>';
+      el.appendChild(document.createElement("span"));
+      el.addEventListener("click",()=>tapCell(c));
+    }
+    grid.appendChild(el);cellEls.push(el);
+  }
+}
+function tapCell(c){
+  const ss=G.at[c];if(!ss.length)return;
+  let pick;
+  if(ss.includes(G.sel)&&ss.length>1)pick=ss.find(x=>x!==G.sel);
+  else if(ss.includes(G.sel))pick=G.sel;
+  else pick=ss.find(x=>!G.slots[x].solved)??ss[0];
+  if(pick!==G.sel)select(pick);
+}
+function render(){
+  if(!G)return;
+  const s=cur(),selSet=new Set(G.done?[]:s.cells);
+  const cursor=G.done||s.solved?-1:s.cells.find((c,i)=>!G.known.has(c)&&!G.buf[i]);
+  for(let c=0;c<25;c++){
+    if(!G.at[c].length)continue;
+    const el=cellEls[c],txt=el.lastChild;
+    let L="",cls="cell";
+    if(G.known.has(c)){L=G.known.get(c);cls+=" known"}
+    else if(G.done&&!G.won){L=G.slots[G.at[c][0]].ans[G.slots[G.at[c][0]].cells.indexOf(c)];cls+=" reveal"}
+    else if(selSet.has(c)){L=G.buf[s.cells.indexOf(c)]||""}
+    if(selSet.has(c))cls+=" sel";
+    if(c===cursor)cls+=" cursor";
+    const keep=["pop","shake"].filter(k=>el.classList.contains(k));
+    el.className=cls+(keep.length?" "+keep.join(" "):"");
+    el.setAttribute("aria-label",G.slots[G.at[c][0]].label+" letter "+(L||"blank"));
+    txt.textContent=L;
+  }
+  // status
+  const left=G.budget-G.used;
+  $("left").textContent=left;
+  const m=$("meter");m.firstChild.style.width=(left/G.budget*100)+"%";
+  m.className="meter"+(left===0?" out":left<=3?" low":"");
+  $("where").textContent=(G.kind==="friend"?"Friend's grid · ":"")+DNAME[G.diff]+" · "+G.slots.length+" words";
+  $("code").textContent=G.code;
+  $("mDaily").setAttribute("aria-pressed",G.kind==="daily");
+  $("mEndless").setAttribute("aria-pressed",G.kind!=="daily");
+  document.querySelectorAll("[data-d]").forEach(b=>b.setAttribute("aria-pressed",b.dataset.d===G.diff));
+  // history
+  $("hLabel").textContent=s.label;
+  $("hCount").textContent=s.solved?"solved in "+s.hist.length+(s.hist.length===1?" guess":" guesses"):s.hist.length?s.hist.length+(s.hist.length===1?" guess":" guesses"):"";
+  const rows=$("rows");rows.innerHTML="";
+  if(!s.hist.length){
+    const k=s.cells.filter(c=>G.known.has(c)).length;
+    rows.textContent=s.solved?"Filled in entirely by crossing words.":k?k+" letter"+(k>1?"s":"")+" already locked in from crossing words. Type the rest.":"No guesses here yet. Type a word and press Enter.";
+  }else{
+    [...s.hist].reverse().forEach(h=>{
+      const m=document.createElement("span");m.className="mini";
+      m.innerHTML=[...h.w].map((l,i)=>'<i class="'+(h.fb[i]==="b"?"":h.fb[i])+'">'+l+'</i>').join("");
+      rows.appendChild(m);
+    });
+  }
+  // keyboard colors for the selected word
+  const st={},rank={b:1,y:2,g:3};
+  s.hist.forEach(h=>[...h.w].forEach((l,i)=>{const f=h.fb[i];if(!st[l]||rank[f]>rank[st[l]])st[l]=f}));
+  s.cells.forEach(c=>{if(G.known.has(c))st[G.known.get(c)]="g"});
+  document.querySelectorAll(".k[data-k]").forEach(b=>{const k=b.dataset.k;b.className="k"+(st[k]?" "+st[k]:"")});
+}
+
+function buildKb(){
+  const kb=$("kb");
+  ["qwertyuiop","asdfghjkl","+zxcvbnm-"].forEach(row=>{
+    const r=document.createElement("div");r.className="kr";
+    [...row].forEach(ch=>{
+      const b=document.createElement("button");
+      if(ch==="+"){b.className="k wide";b.textContent="Enter";b.onclick=enter}
+      else if(ch==="-"){b.className="k wide";b.innerHTML="⌫";b.setAttribute("aria-label","Delete");b.onclick=backspace}
+      else{b.className="k";b.dataset.k=ch;b.textContent=ch;b.onclick=()=>typeLetter(ch)}
+      r.appendChild(b);
+    });
+    kb.appendChild(r);
+  });
+}
+
+// ---------- end screen & sharing ----------
+function shareText(){
+  const lines=["Crossle "+G.code+" · "+DNAME[G.diff],(G.won?G.used+"/"+G.budget+" ✅":"X/"+G.budget+" ❌")];
+  G.slots.forEach(s=>{
+    const marks=s.hist.map(h=>h.fb==="ggggg"?"🟩":/g/.test(h.fb)?"🟨":/y/.test(h.fb)?"🟧":"⬛").join("");
+    lines.push(s.short.padEnd(4," ")+(marks||(s.solved?"✨":"·")));
+  });
+  const url=location.origin+location.pathname;
+  lines.push(G.kind==="daily"?url:"Play my grid: "+url+"#"+G.code);
+  return lines.join("\n");
+}
+function showEnd(){
+  $("eTitle").textContent=G.won?(G.used<=G.budget*0.6?"Clean sweep":"Grid cleared"):"Out of guesses";
+  $("eSub").textContent=G.won?"Solved "+G.slots.length+" words with "+G.used+" of "+G.budget+" guesses.":"The grid had these words:";
+  $("eAns").innerHTML=G.slots.map(s=>'<div class="ans"><span class="lbl">'+s.label+'</span><span class="mini">'+[...s.ans].map(l=>'<i class="'+(s.solved?"g":"")+'">'+l+'</i>').join("")+'</span><span>'+(s.hist.length?s.hist.length+"×":"free")+'</span></div>').join("");
+  const st=stat(G.diff);
+  $("eStats").innerHTML=[["Played",st.played],["Win %",st.played?Math.round(st.won/st.played*100):0],["Streak",st.streak],["Best",st.best??"–"]].map(([k,v])=>'<div><b>'+v+'</b><span>'+k+'</span></div>').join("");
+  $("eNext").textContent=G.kind==="daily"?"Play Endless":"Next grid";
+  $("eCopy").hidden=true;
+  $("ovEnd").hidden=false;
+}
+function showStats(){
+  if(G&&G.done){showEnd();return}
+  $("eTitle").textContent=DNAME[store.diff]+" stats";
+  $("eSub").textContent="Finish this grid to see its result here.";
+  $("eAns").innerHTML="";
+  const st=stat(store.diff);
+  $("eStats").innerHTML=[["Played",st.played],["Win %",st.played?Math.round(st.won/st.played*100):0],["Streak",st.streak],["Best",st.best??"–"]].map(([k,v])=>'<div><b>'+v+'</b><span>'+k+'</span></div>').join("");
+  $("eShare").hidden=true;$("eNext").hidden=true;$("eCopy").hidden=true;
+  $("ovEnd").hidden=false;
+}
+async function copyText(t,fallbackEl){
+  try{await navigator.clipboard.writeText(t);toast("Copied");return true}
+  catch(e){if(fallbackEl){fallbackEl.value=t;fallbackEl.hidden=false;fallbackEl.focus();fallbackEl.select()}toast("Select and copy the text");return false}
+}
+
+let toastT;
+function toast(msg){const t=$("toast");t.textContent=msg;t.classList.add("on");clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove("on"),1600)}
+
+// ---------- modes ----------
+function goDaily(d){store.mode="daily";store.diff=d;save();startGame(dailyCode(d),"daily")}
+function goEndless(d,fresh){
+  store.mode="endless";store.diff=d;
+  let c=store.endless[d];
+  if(!c||fresh||(store.games[c]&&store.games[c].counted)){c=randCode(d);store.endless[d]=c}
+  save();startGame(c,"endless");
+}
+function goCode(c){
+  c=c.trim().toLowerCase();
+  if(!CODE_RE.test(c)){toast("Codes look like m-k3j9xq");return false}
+  store.diff=c[0];save();
+  startGame(c,/^[emh]-d\d{8}$/.test(c)&&c===dailyCode(c[0])?"daily":"friend");
+  return true;
+}
+
+// ---------- wiring ----------
+buildKb();
+$("mDaily").onclick=()=>goDaily(G?G.diff:store.diff);
+$("mEndless").onclick=()=>goEndless(G?G.diff:store.diff,false);
+document.querySelectorAll("[data-d]").forEach(b=>b.onclick=()=>{const d=b.dataset.d;(G&&G.kind==="daily")?goDaily(d):goEndless(d,false)});
+$("prev").onclick=()=>cycle(-1);$("next").onclick=()=>cycle(1);
+$("bHelp").onclick=()=>{$("ovHelp").hidden=false};
+$("bStats").onclick=showStats;
+$("code").onclick=()=>copyText(G.code);
+$("codeGo").onclick=()=>{if(goCode($("codeIn").value)){$("ovHelp").hidden=true;$("codeIn").value=""}};
+$("codeIn").addEventListener("keydown",e=>{e.stopPropagation();if(e.key==="Enter")$("codeGo").click()});
+$("eShare").onclick=()=>copyText(shareText(),$("eCopy"));
+$("eNext").onclick=()=>{$("ovEnd").hidden=true;goEndless(G.diff,true)};
+document.querySelectorAll(".overlay").forEach(o=>{
+  o.addEventListener("click",e=>{if(e.target===o||e.target.closest("[data-close]")){o.hidden=true;$("eShare").hidden=false;$("eNext").hidden=false;store.seen=true;save()}});
+});
+document.addEventListener("keydown",e=>{
+  if(e.metaKey||e.ctrlKey||e.altKey)return;
+  if(!$("ovHelp").hidden||!$("ovEnd").hidden){if(e.key==="Escape")document.querySelectorAll(".overlay").forEach(o=>o.hidden=true);return}
+  if(/^[a-zA-Z]$/.test(e.key)){typeLetter(e.key.toLowerCase());e.preventDefault()}
+  else if(e.key==="Backspace"){backspace();e.preventDefault()}
+  else if(e.key==="Enter"){enter();e.preventDefault()}
+  else if(e.key==="ArrowRight"||e.key==="ArrowDown"||e.key==="Tab"){cycle(e.shiftKey?-1:1);e.preventDefault()}
+  else if(e.key==="ArrowLeft"||e.key==="ArrowUp"){cycle(-1);e.preventDefault()}
+});
+
+// boot: a #code in the link opens that grid
+const h=(location.hash||"").slice(1).toLowerCase();
+if(CODE_RE.test(h))goCode(h);
+else if(store.mode==="endless")goEndless(store.diff,false);
+else goDaily(store.diff);
+if(!store.seen)$("ovHelp").hidden=false;
+</script>
+
+</body>
+</html>
